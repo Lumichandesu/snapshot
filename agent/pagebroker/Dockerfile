@@ -54,7 +54,20 @@ RUN find /tmp/nixl/subprojects -type f \( -iname 'license*' -o -iname 'copying*'
       done < /tmp/nixl-notices > /nixl-runtime/THIRD-PARTY-NOTICES.txt
 RUN git -C /tmp/nvtx rev-parse HEAD > /NVTX_COMMIT
 
+# Verify the complete SDK so public headers and native libraries stay matched,
+# including when a separately provisioned artifact directory is supplied.
+FROM ${DOCKER_PROXY}library/${PAGEBROKER_BUILD_IMAGE} AS model-streamer-install
+WORKDIR /opt/model-streamer-sdk
+COPY model-streamer-sdk.sha256 /tmp/model-streamer-sdk.sha256
+COPY --from=model-streamer-sdk /sdk.tar.gz ./sdk.tar.gz
+RUN sha256sum -c /tmp/model-streamer-sdk.sha256 \
+    && tar -xzf sdk.tar.gz --strip-components=1 \
+    && rm sdk.tar.gz
+
 FROM ${DOCKER_PROXY}library/${PAGEBROKER_BUILD_IMAGE} AS build-dependencies
+
+COPY --from=model-streamer-install /opt/model-streamer-sdk/lib/libstreamer.so /usr/local/lib/libstreamer.so
+COPY --from=model-streamer-install /opt/model-streamer-sdk/include/ /usr/local/include/
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -116,7 +129,7 @@ COPY compliance/gen-attribution.sh /tmp/gen-attribution.sh
 RUN sh /tmp/gen-attribution.sh /legal/source/protobuf /legal/THIRD-PARTY.txt \
     /legal/source/libaio /legal/source/nixl /legal/source/nvtx
 
-FROM ${PAGEBROKER_BASE_IMAGE}
+FROM ${PAGEBROKER_BASE_IMAGE} AS runtime
 
 COPY --from=build /src/pagebroker /usr/local/bin/pagebroker
 COPY --from=build /runtime-lib/ /usr/local/lib/
@@ -124,5 +137,8 @@ COPY --from=nixl /nixl-runtime/lib/ /usr/local/lib/
 COPY --from=sources /legal /legal
 ENV LD_LIBRARY_PATH=/usr/local/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
 ENV NIXL_PLUGIN_DIR=/usr/local/lib/plugins
+COPY --from=model-streamer-sdk /legal/ /legal/model-streamer/
+COPY --from=model-streamer-install /opt/model-streamer-sdk/lib/libstreamer.so /usr/local/lib/libstreamer.so
+COPY --from=model-streamer-install /opt/model-streamer-sdk/LICENSE /legal/model-streamer/LICENSE
 
 ENTRYPOINT ["/usr/local/bin/pagebroker"]

@@ -29,6 +29,7 @@ The root `Makefile` builds all three images. Override `REGISTRY` and `VERSION`
 to tag them for the registry:
 
 ```bash
+make model-streamer-artifacts
 make docker-build-agent docker-build-pagebroker docker-build-operator \
   REGISTRY=<registry> \
   VERSION=<tag>
@@ -38,6 +39,46 @@ This produces `<registry>/agent:<tag>`, `<registry>/pagebroker:<tag>`, and
 `<registry>/operator:<tag>`. The agent and PageBroker images must be built from
 the same checkout: they speak an internal protocol and the chart pulls both at
 `image.agent.tag`.
+
+Download the pinned Model Streamer SDK before building the PageBroker image:
+
+```bash
+make model-streamer-artifacts
+```
+
+This downloads the Linux x86_64 C++ SDK from
+[Model Streamer 0.17.0](https://github.com/dsx-ai-factory/model-streamer/releases/tag/0.17.0)
+and verifies its committed SHA-256 checksum. No Model Streamer compilation or
+Python wheel installation is needed. CI runs the same target.
+
+The output defaults to `.model-streamer/`; override `MODEL_STREAMER_ARTIFACT_DIR`
+for another location. It contains `sdk.tar.gz`, extracted `include/` and `lib/`
+directories for native builds, and `legal/` with the release license, version,
+source revision and corresponding source archives.
+
+`docker-build-pagebroker` takes that directory as one SDK input and verifies the
+archive again before extracting the build headers and core library.
+The image includes the matching license and source materials. The agent image
+build does not require Model Streamer.
+
+For native builds, use the extracted SDK:
+
+```bash
+make -C agent/pagebroker test daemon \
+  MODEL_STREAMER_INCLUDE_DIR="$PWD/.model-streamer/include" \
+  MODEL_STREAMER_LIB_DIR="$PWD/.model-streamer/lib"
+```
+
+PageBroker submits CPU destinations and needs no CUDA driver. The filesystem
+strategy defaults to the library's ordered
+`io_uring_direct,libaio_direct,sync_buffered` preference list. Use `RUNAI_STREAMER_FS_STRATEGY` before starting PageBroker to select an explicit
+list such as `io_uring_buffered,sync_buffered`.
+
+Native sessions admit at most eight submissions and target 10 GB of submitted
+bytes; one larger file runs alone. Admission closes on the first completed
+submission. All destinations remain mapped until the session ends, then pending
+work starts a new session. Terminal failures stop native access before releasing
+any affected restore; ordinary completed storage errors fail their own restore.
 
 ## 3. Push the images
 

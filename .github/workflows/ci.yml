@@ -164,6 +164,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - run: |
           set -euo pipefail
+          make model-streamer-artifacts
           # Assigned, not inlined into the argument: a command substitution
           # that fails inside a simple command does not trip `set -e`, so an
           # inline call would drop the cache flags and still build.

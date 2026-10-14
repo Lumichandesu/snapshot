@@ -164,6 +164,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Download Model Streamer SDK
+        if: ${{ matrix.image == 'pagebroker' }}
+        run: make model-streamer-artifacts
+
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
