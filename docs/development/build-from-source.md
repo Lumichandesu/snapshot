@@ -57,7 +57,7 @@ directories for native builds, and `legal/` with the release license, version,
 source revision and corresponding source archives.
 
 `docker-build-pagebroker` takes that directory as one SDK input and verifies the
-archive again before extracting the build headers and core library.
+archive again before extracting the build headers and core and S3 libraries.
 The image includes the matching license and source materials. The agent image
 build does not require Model Streamer.
 
@@ -79,6 +79,11 @@ bytes; one larger file runs alone. Admission closes on the first completed
 submission. All destinations remain mapped until the session ends, then pending
 work starts a new session. Terminal failures stop native access before releasing
 any affected restore; ordinary completed storage errors fail their own restore.
+
+The pinned S3 plugin tears down clients process-wide. PageBroker therefore
+admits one native session per process across restore coordinators, while reads
+within that session remain concurrent. Waiting coordinators poll cancellation
+and deadlines until the previous session has fully drained.
 
 ## 3. Push the images
 
@@ -118,3 +123,13 @@ Common `make` targets from the repo root:
 
 See [CONTRIBUTING.md](../../CONTRIBUTING.md) for the contribution process and DCO
 sign-off.
+
+### Native S3 read verification
+
+Build the `s3-test` Docker target using the pinned SDK input above. Install
+`agent/pagebroker/tests/requirements.txt` in a virtual environment, then run
+`agent/pagebroker/tests/s3_integration.py --image local/pagebroker:s3-test`.
+Add `--tls` to verify the temporary CA and rejection of untrusted TLS. The
+fixture uses disposable local Moto storage and fake credentials. Payloads are
+read by the native Model Streamer plugin and checked against the restore plan's
+SHA-256 digests before final permissions are applied.

@@ -68,12 +68,14 @@ FROM ${DOCKER_PROXY}library/${PAGEBROKER_BUILD_IMAGE} AS build-dependencies
 
 COPY --from=model-streamer-install /opt/model-streamer-sdk/lib/libstreamer.so /usr/local/lib/libstreamer.so
 COPY --from=model-streamer-install /opt/model-streamer-sdk/include/ /usr/local/include/
+COPY --from=model-streamer-install /opt/model-streamer-sdk/lib/libstreamers3.so /usr/local/lib/libstreamers3.so
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libaio-dev \
     libgtest-dev \
     libprotobuf-dev \
+    libssl-dev \
     pkg-config \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
@@ -91,7 +93,8 @@ COPY . .
 # Run CPU tests and compile GPU tests. GPU tests run separately.
 RUN make test CUDA_ROOT=/opt/cuda NIXL_ROOT=/usr/local \
     && make build/gpu-checkpoint-test build/gpu-transfer-test CUDA_ROOT=/opt/cuda CUDA_LIBRARY_DIR=/opt/cuda/lib64/stubs \
-    && make daemon CUDA_ROOT=/opt/cuda NIXL_ROOT=/usr/local
+    && make daemon CUDA_ROOT=/opt/cuda NIXL_ROOT=/usr/local \
+    && make s3-test-build CUDA_ROOT=/opt/cuda NIXL_ROOT=/usr/local
 
 # The CLI remains usable without a driver. CUDA is loaded only for capability
 # detection, and no build-time driver stub is shipped in the runtime image.
@@ -137,8 +140,22 @@ COPY --from=nixl /nixl-runtime/lib/ /usr/local/lib/
 COPY --from=sources /legal /legal
 ENV LD_LIBRARY_PATH=/usr/local/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
 ENV NIXL_PLUGIN_DIR=/usr/local/lib/plugins
+COPY --from=build /usr/lib/x86_64-linux-gnu/libcrypto.so.3 /usr/local/lib/libcrypto.so.3
+COPY --from=build /usr/share/doc/libssl-dev/copyright /legal/openssl/copyright
 COPY --from=model-streamer-sdk /legal/ /legal/model-streamer/
 COPY --from=model-streamer-install /opt/model-streamer-sdk/lib/libstreamer.so /usr/local/lib/libstreamer.so
 COPY --from=model-streamer-install /opt/model-streamer-sdk/LICENSE /legal/model-streamer/LICENSE
+COPY --from=model-streamer-install /opt/model-streamer-sdk/lib/libstreamers3.so /usr/local/lib/libstreamers3.so
+COPY --from=model-streamer-install /opt/model-streamer-sdk/LICENSE /legal/model-streamer-s3/LICENSE
+
+# libstreamers3.so is loaded with dlopen inside libstreamer.so; the executable's
+# RUNPATH alone does not cover that lookup or all transitive dependencies.
 
 ENTRYPOINT ["/usr/local/bin/pagebroker"]
+
+# Exercise real S3 reads with the exact production runtime and trust store.
+FROM runtime AS s3-test
+COPY --from=build /src/build/model-streamer-s3-test /usr/local/bin/model-streamer-s3-test
+ENTRYPOINT ["/usr/local/bin/model-streamer-s3-test"]
+
+FROM runtime AS final
